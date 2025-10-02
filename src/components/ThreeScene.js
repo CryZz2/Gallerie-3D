@@ -2,6 +2,10 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
 
 // Dimensions et configuration de la grille d'affiches
 const POSTER_W = 1;
@@ -19,8 +23,11 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
     const cameraRef = useRef();
     const controlsRef = useRef(null);
 
+    const composerRef = useRef(null);
+    const bloomPassRef = useRef(null);
     // Groupe qui contient tous les posters
     const postersGroupRef = useRef(new THREE.Group());
+    const wallRef = useRef(null);
 
     // Outils pour le picking (sélection d'affiche à la souris)
     const raycaster = useRef(new THREE.Raycaster());
@@ -98,6 +105,8 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
         mount.appendChild(renderer.domElement);
         rendererRef.current = renderer;
 
+
+
         // Ajout des lumières
         scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.9));
         const dir = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -115,6 +124,28 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
         controls.maxDistance = 12;
         controls.target.set(0, 0.6, 0);
         controlsRef.current = controls;
+
+        // --- Post-processing: composer + bloom ---
+        const composer = new EffectComposer(renderer);
+        composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        composer.setSize(mount.clientWidth, mount.clientHeight);
+
+        // le rendu normal de la scène comme première "pass"
+        composer.addPass(new RenderPass(scene, camera));
+
+        // bloom: (resolution, strength, radius, threshold)
+        const bloom = new UnrealBloomPass(
+            new THREE.Vector2(mount.clientWidth, mount.clientHeight),
+            0.7,   // strength: intensité du halo (0.4–1.2)
+            0.8,   // radius: étalement (0.6–1.0)
+            0.01   // threshold: seuil de luminosité à partir duquel ça "bloom"
+        );
+        bloom.threshold = 0.2; // utile pour filtrer un peu (0.0–0.3)
+        composer.addPass(bloom);
+
+        composerRef.current = composer;
+        bloomPassRef.current = bloom;
+
 
         // --- MIROIR (sol réfléchissant)
         const groundGeo = new THREE.PlaneGeometry(40, 40);
@@ -163,7 +194,7 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
         const onResize = () => {
             camera.aspect = mount.clientWidth / mount.clientHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(mount.clientWidth, mount.clientHeight);
+            composerRef.current?.setSize(mount.clientWidth, mount.clientHeight);
         };
         window.addEventListener("resize", onResize);
 
@@ -217,7 +248,7 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
         let raf;
         const tick = () => {
             controls.update();
-            renderer.render(scene, camera);
+            composerRef.current?.render();
             raf = requestAnimationFrame(tick);
         };
         tick();
@@ -299,4 +330,61 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
             style={{ width: "100%", height: "70vh", borderRadius: 12, overflow: "hidden" }}
         />
     );
+
+    function disposeMesh(mesh, scene) {
+        if (!mesh) return;
+        scene.remove(mesh);
+        mesh.geometry?.dispose?.();
+        if (mesh.material?.map) mesh.material.map.dispose();
+        mesh.material?.dispose?.();
+    }
+
+    function updatePostersWall(scene, group, wallRef) {
+        // Si pas d’affiche → enlève le mur
+        if (!group || group.children.length === 0) {
+            if (wallRef.current) { disposeMesh(wallRef.current, scene); wallRef.current = null; }
+            return;
+        }
+
+        // Bounding box de la grille d’affiches
+        const bbox = new THREE.Box3().setFromObject(group);
+        const size = new THREE.Vector3(); bbox.getSize(size);
+        const center = new THREE.Vector3(); bbox.getCenter(center);
+
+        // marges autour des affiches (réglables)
+        const marginX = 0.6;
+        const marginY = 0.6;
+        const W = size.x + marginX;
+        const H = size.y + marginY;
+
+        const zOffset = -0.03; // un chouia derrière les posters (posters à z≈0)
+
+        if (!wallRef.current) {
+            const geo = new THREE.PlaneGeometry(W, H);
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0x0f0f0f,   // gris très sombre (comme ton sol)
+                roughness: 0.95,
+                metalness: 0.0
+            });
+            mat.polygonOffset = true;               // évite tout z-fighting
+            mat.polygonOffsetFactor = 1;
+            mat.polygonOffsetUnits = 1;
+
+            const wall = new THREE.Mesh(geo, mat);
+            wall.receiveShadow = true;
+            wall.position.set(center.x, center.y, zOffset);
+
+            // 👉 Si tu utilises des backlights sur layer 2, décommente :
+            // wall.layers.set(2);
+
+            scene.add(wall);
+            wallRef.current = wall;
+        } else {
+            // on met à jour taille & position
+            wallRef.current.geometry.dispose();
+            wallRef.current.geometry = new THREE.PlaneGeometry(W, H);
+            wallRef.current.position.set(center.x, center.y, zOffset);
+            wallRef.current.visible = true;
+        }
+    }
 }
