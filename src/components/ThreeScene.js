@@ -26,7 +26,7 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
     const bloomPassRef = useRef(null);
     // Groupe qui contient tous les posters
     const postersGroupRef = useRef(new THREE.Group());
-    const wallRef = useRef(null);
+    //const wallRef = useRef(null);
 
     // Outils pour le picking (sélection d'affiche à la souris)
     const raycaster = useRef(new THREE.Raycaster());
@@ -321,7 +321,7 @@ export default function ThreeScene({ movies = [], onClickPoster }) {
         });
 
         cameraRef.current?.lookAt(group.position);
-    }, [movies]);
+    }, [movies, onClickPoster]);
     // Rendu du conteneur de la scène 3D
     return (
         <div
