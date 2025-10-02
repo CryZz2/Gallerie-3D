@@ -1,4 +1,4 @@
-const TMDB_KEY = import.meta?.env?.VITE_TMDB_KEY || process.env.REACT_APP_TMDB_KEY;
+const TMDB_KEY = process.env.REACT_APP_TMDB_KEY;
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMG_BASE = "https://image.tmdb.org/t/p/"; // tailles: w185, w342, w500, original
 
